@@ -342,6 +342,16 @@ Sample: BSUIO096-24
 
 ### Step 6 — Manual Verification
 
+**Purpose:** There is a chance some specimen taxonomy cannot be resolved programatically and require manual taxonomic review to determine the correct, currently accepted scientific name before they can be submitted to ENA. These are written to `{basename}_manually_verify.xlsx` by the GBIF Name Processor (Step 5) and should be reviewed by a taxonomist or the submitting researcher before proceeding.
+
+For each record, determine whether the `scientificName` is a valid, GBIF species name, or whether it requires correction, and record your decision in a mnaully appended `confirmed_taxonomy` column. Supporting evidence for your decision should be provide din a manually appended `notes` column. 
+
+- If the scientificName is **valid, accepted, and GBIF is incorrect** — copy the scientificName to the `confirmed_taxonomy` column, unchanged.
+- If the taxon name **requires manual correction** — **provide the accepted name in `confirmed_taxonomy` along with supporting evidence in `notes`, such as a link to a taxonomic database other than GBIF, or a literature reference**. Useful resources for verification include [Catalogue of Life](https://www.catalogueoflife.org/), [ITIS](https://www.itis.gov/), [WoRMS](https://www.marinespecies.org/), [Index Fungorum](https://www.indexfungorum.org/), and relevant taxonomic literature.
+
+Save the completed file as `*_manually_verify-complete.xlsx` before proceeding.
+
+
 
 
 
@@ -356,7 +366,6 @@ The remaining steps are:
 
 | Step | Script | Purpose |
 |---|---|---|
-| 6 | *(manual — Ben's Gemini Gem)* | Manual verification of scientificNames that could not be resolved programmatically |
 | 7 | `04_post_ver_ena_check.py` | Re-run ENA check using manually verified/corrected names |
 | 8 | `05_post_ver_gbif_check.py` | Re-run GBIF search for names that still have no ENA match after verification |
 | 9 | *(manual)* | Final verification of unresolved records |
@@ -410,4 +419,4 @@ taxid-minting-process/
 
 ## Citation / Acknowledgements
 
-Developed at the Natural History Museum London as part of the Biodiversity Genomics Europe (BGE) initiative and UKBOL (UK Barcode of Life) project.
+Developed by Dan Parsons and Ben Price at the Natural History Museum (NHM) London, as part of the Biodiversity Genomics Europe (BGE) initiative and UKBOL (UK Barcode of Life) projects.
