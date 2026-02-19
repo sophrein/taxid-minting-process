@@ -157,28 +157,22 @@ python 01_ena_taxid_check.py \
     --output ./taxid_request/01_ena_taxid_check/01_ena_check_species.csv
 ```
 
-**Arguments:**
-
 | Argument | Description |
 |---|---|
 | `--input` / `--in` | Species-level CSV from Step 1 |
 | `--output` / `--out` | Base path for output files (script generates split files automatically) |
 
 **Logic:**
-
 For each record, the script:
-
-1. Reads `scientificName` and strips any `cf.` qualifiers before querying (e.g. `"Genus cf. species"` → `"Genus species"`)
+1. Reads `scientificName` and strips any ambiguity qualifiers (e.g. 'cf.' or 'nr.') before querying (e.g. `"Genus cf. species"` → `"Genus species"`)
 2. Queries the ENA suggest-for-submission API endpoint
 3. Checks returned results for an exact match against `scientificName` (case-insensitive), and also checks the `otherNames` field for synonym matches
-4. For each exact match found, fetches the full ENA lineage via the tax-id endpoint and verifies that the input `phylum` appears in the returned lineage — this is the homonym detection step
-5. Assigns a status code to each record
+4. For each match found, fetches the full ENA lineage via the taxid endpoint, and verifies that the input `phylum` appears in the returned lineage (another homonym detection step)
+5. Assigns an ENA status code to each record
 
-**Status codes:**
-
-| Status | Meaning | Action |
+| Status code | Meaning | Action |
 |---|---|---|
-| `MATCH_TAXONOMICALLY_CONSISTENT` | Exact match found and phylum verified | ✅ Ready — excluded from further processing |
+| `MATCH_TAXONOMICALLY_CONSISTENT` | Exact match found and phylum verified | ✅ No taxid needed — excluded from further processing |
 | `NO_EXACT_MATCH` | ENA returned results but none matched exactly | ⚠️ Requires GBIF search (Step 4) |
 | `NO_RESULTS_RETURNED` | ENA returned no suggestions at all | ⚠️ Requires GBIF search (Step 4) |
 | `MATCH_PHYLUM_UNCHECKED` | Match found but no phylum to verify against | ⚠️ Possible homonym — manual review |
@@ -187,38 +181,38 @@ For each record, the script:
 | `API_ERROR: *` | API communication failure | ❌ Retry or check connectivity |
 
 **Outputs:**
-
 | File | Description |
 |---|---|
-| `*-ena_matches.csv` | `MATCH_TAXONOMICALLY_CONSISTENT` — done |
-| `*-no_ena_matches.csv` | `NO_EXACT_MATCH` / `NO_RESULTS_RETURNED` — proceed to GBIF |
+| `*-ena_matches.csv` | `MATCH_TAXONOMICALLY_CONSISTENT` — End |
+| `*-no_ena_matches.csv` | `NO_EXACT_MATCH` / `NO_RESULTS_RETURNED` — proceed to GBIF search |
 | `*-possible_homonym.csv` | `MATCH_PHYLUM_UNCHECKED` / `TAXONOMIC_MISMATCH_HOMONYM` — review |
-| `*-errors.csv` | `MAN_VER_NAME_EMPTY` / `API_ERROR` — fix input |
+| `*-errors.csv` | `MAN_VER_NAME_EMPTY` / `API_ERROR` — review and fix input |
 | `*-filtered.csv` | All records **except** `MATCH_TAXONOMICALLY_CONSISTENT` — this is the input to Step 4 |
 | `01_ena_taxid_check.log` | Full API call log with match decisions |
 
-> The `-filtered.csv` file is the convenient combined input for the next step — it contains everything that still needs resolution.
+**The `-filtered.csv` file is the input for the next step** — it contains everything that still needs resolution.
+The `*-ena_matches.csv` records have confirmed ENA taxids. These do not require a new taxid request and can be used directly in submission metadata.
 
 **Diagnostics to check:**
-- `errors.csv` should be empty — any API errors suggest connectivity issues; re-run affected records
+- `errors.csv` should be empty — Fix sample data in input file. If any API errors suggest connectivity issues; re-run affected records
 - `possible_homonym.csv` should be empty if `phylum` is consistently populated in your input data
-- The ratio of `MATCH_TAXONOMICALLY_CONSISTENT` to `NO_EXACT_MATCH` will vary by taxonomic group; obscure invertebrates and parasitoids often have low ENA match rates
+
+
 
 ---
 
+
+
 ### Step 4 — GBIF Backbone Search, Round 1 (`02_gbif_backbone_search2.py`)
 
-**Purpose:** For records that did not match in ENA (the `-filtered.csv` from Step 3), query the GBIF backbone taxonomy to retrieve canonical name information, synonymy, and authoritative species keys. GBIF serves as a secondary source of truth for names not yet registered in ENA.
+**Purpose:** For records that did not match in ENA (the `-filtered.csv` from Step 3), query the GBIF backbone taxonomy to retrieve canonical name information, synonymy, and authoritative species keys. GBIF is intended to serve as a source of truth for names not yet registered in ENA.
 
 **Run:**
-
 ```bash
-python 02_gbif_backbone_search2.py \
+python 02_gbif_backbone_search.py \
     --input ./taxid_request/01_ena_taxid_check/01_ena_check_species-filtered.csv \
     --output ./taxid_request/02_gbif_search/02_gbif_output_1.csv
 ```
-
-**Arguments:**
 
 | Argument | Description |
 |---|---|
@@ -226,19 +220,29 @@ python 02_gbif_backbone_search2.py \
 | `-o` / `--output` | Output CSV path |
 
 **Logic:**
+The script implements a multi-stage search strategy for each record:
 
-The script implements a multi-stage search strategy for each record, in order:
-
-**Stage 1 — Standard search.** Calls `name_backbone(scientificName=...)` with no taxonomic constraints. If the result is valid (has a usageKey, is not too broad), this result is used.
-
-**Stage 2 — Disambiguation.** If Stage 1 returns `usageKey=1` (Animalia root, meaning the name matched the entire animal kingdom) or a rank of `KINGDOM`/`PHYLUM`, the search is retried with `phylum`, `order`, and `family` as constraints. This handles cases like genus names that are homonyms across multiple families.
-
+**Stage 1 — Standard search.** Queries `name_backbone()` with the `scientificName` only (no taxonomic constraints). If the result is valid (has a usageKey, is not too broad), this result is used.
+**Stage 2 — Disambiguation.** If Stage 1 returns `usageKey=1` (Animalia root, meaning the name matched the entire animal kingdom) or a rank of `KINGDOM`/`PHYLUM`, the search is retried with `phylum`, `order`, and/or `family` as constraints. This handles cases like genus names that are homonyms across multiple families.
 **Stage 3 — Homonym resolution.** If the ENA status for this record was `TAXONOMIC_MISMATCH_HOMONYM`, the search goes directly to a phylum-constrained lookup, bypassing Stage 1.
+**Stage 4 — Fuzzy lookup.** If all above stages fail to find a valid match, queries with `verbose=True` to retrieve alternative matches, filtered by phylum (and optionally family) to catch misspellings. This catches genuine misspellings in the input data (e.g. `"Etone flava"` → `"Eteone flava"`).
 
-**Stage 4 — Fuzzy lookup.** If all above stages fail to find a valid match, `name_backbone(verbose=True)` is called to retrieve alternative matches. These alternatives are filtered by `phylum` (and optionally `family`) and ranked by confidence score. This catches genuine misspellings in the input data (e.g. `"Etone flava"` → `"Eteone flava"`).
 
-**GBIF match types in output:**
+**Key output columns added:**
+| Column | Description |
+|---|---|
+| `gbif_usageKey` | GBIF usage key for the matched taxon |
+| `gbif_scientificName` | Full scientific name as recorded in GBIF |
+| `gbif_canonicalName` | Name without authorship |
+| `gbif_rank` | Taxonomic rank of the match |
+| `gbif_status` | `ACCEPTED`, `SYNONYM`, `DOUBTFUL`, etc. |
+| `gbif_matchType` | `EXACT`, `FUZZY`, `HIGHERRANK`, `NONE` |
+| `gbif_confidence` | Match confidence score (0–100) |
+| `gbif_species` | Accepted species name (useful when input is a synonym) |
+| `gbif_speciesKey` | GBIF key for the accepted species |
+| `gbif_notes` | How the match was resolved (e.g. `homonym_resolved_with_phylum`, `suggested_match_from_fuzzy_alternative`) |
 
+**GBIF match types explained:**
 | `gbif_matchType` | Meaning |
 |---|---|
 | `EXACT` | Name matched exactly |
@@ -246,37 +250,112 @@ The script implements a multi-stage search strategy for each record, in order:
 | `FUZZY_ALTERNATIVE` | Match came from verbose alternatives list |
 | `NONE` | No match found |
 
-**`gbif_notes` values:**
-
+**`gbif_notes` values explained:**
 | Note | Meaning |
 |---|---|
 | *(empty)* | Standard match, no special handling |
 | `homonym_resolved_with_phylum` | Phylum constraint used to resolve kingdom-level homonym |
 | `disambiguated_with_phylum=X+...` | Broader match narrowed using higher taxonomy |
-| `suggested_match_from_fuzzy_alternative` | Match found via verbose alternatives — review recommended |
+| `suggested_match_from_fuzzy_alternative` | Match found via verbose alternatives — check recommended |
 | `no_match_found` | No match found at any stage |
 | `disambiguation_failed` | Disambiguation attempted but still no valid result |
 | `fuzzy_search_failed` | Fuzzy lookup also failed |
 | `api_error` | GBIF API error |
 
 **Output columns added (all prefixed `gbif_`):**
-
 `usageKey`, `scientificName`, `canonicalName`, `rank`, `status`, `matchType`, `confidence`, `kingdom`, `phylum`, `class`, `order`, `family`, `genus`, `species`, plus key columns for each rank, `acceptedUsageKey`, and `gbif_notes`.
 
 **Diagnostics to check:**
 - A `match rate` of 100% is expected for well-curated input data — any `no_match_found` records likely have spelling errors or use names not yet in GBIF
-- Records with `suggested_match_from_fuzzy_alternative` in `gbif_notes` should be reviewed manually — the fuzzy match may or may not be the intended taxon
+- Records with `suggested_match_from_fuzzy_alternative` in `gbif_notes` should be checked manually — the fuzzy match may or may not be the intended taxon
 - `gbif_status == 'SYNONYM'` records will have an `acceptedUsageKey` pointing to the accepted name — the GBIF processor in Step 5 handles these automatically
+
+
 
 ---
 
-## Steps 5–8 (Documentation in Progress)
+
+## Step 5 - Processing Name Processing (`gbif_processor.py`)
+
+**Purpose:** This step applies a rules-based decision matrix to the GBIF backbone taxonomy match results from Step 4, determining whether the original submitted name or the GBIF-matched name should be used for each specimen in the downstream ENA taxonomy submission.
+
+**Run:**
+```bash
+python gbif_name_processor.py -i ./taxid_request/02_gbif_search/02_gbif_output_1.csv -r gbif_rules.csv -o ./output --project-id [PROJECT_ID[
+```
+
+| Argument | Description |
+|---|---|
+| `-i / --input` | Input CSV file (GBIF match results from Step 4) |
+| `-r / --rules` | Rules matrix CSV file |
+| `-o / --output-dir` | Output directory (default: same directory as input) |
+| `-p / --project-id` | Project ID to populate in taxonomy request TSV (default: `BGE`) |
+
+**Logic:** Each specimen's GBIF match is evaluated against a configurable rules matrix (`gbif_rules.csv`). The script compares the original scientific name against GBIF's returned match across three axes — species epithet similarity, genus similarity, and type specimen status, then combines these with the GBIF match `status` (e.g. `ACCEPTED`, `SYNONYM`, `DOUBTFUL`) and `matchType` (e.g. `EXACT`, `FUZZY`) to look up the appropriate action in the rules matrix.
+
+For each specimen the script:
+1. Extracts the species epithet and genus from both the original `scientificName` and the GBIF-returned `gbif_species` and `gbif_genus` fields.
+2. Compares them to determine whether they are `same` or `different` at the epithet and genus levels.
+3. Checks whether the specimen has a type designation (`type_status` column).
+4. Constructs a rule key `(status, matchType, species_match, genus_match, is_type)` and looks it up in the loaded rules matrix.
+5. Using the rules matrix, the script then evaluates each record's GBIF result and assigns one of the following `name_to_use` values:
+
+| `name_to_use` | Meaning |
+|---|---|
+| `original` | The original `scientificName` is correct and accepted in GBIF. Proceed to taxid request. |
+| `gbif (check ENA)` | GBIF found a different accepted name (e.g. the input name is a synonym). The GBIF-accepted name should be re-checked against ENA. |
+| `uncertain - check placement` | GBIF match is ambiguous or taxonomic placement is uncertain. Requires manual review. |
+| `not a possible combination` | GBIF flagged the name as taxonomically invalid. Requires manual review. |
+
+**Outputs:**
+| File | Description |
+|---|---|
+| `*_request_taxid.tsv` | Ready-to-submit taxid request TSV for `name_to_use == original` records and no manual verification is required. Deduplicated by name. Description column contains a GBIF species URL (`gbif_speciesKey`), falling back to the genus URL (`gbif_genusKey`) if the species key is absent. Type specimens have `\| TYPE` appended to the description. `name_type` is `published_name` for species-key matches or `novel_species` for genus-key fallbacks |
+| `*_check_ENA.xlsx` | Specimens where `name_to_use == gbif`, requiring ENA validation using the GBIF-matched name. Contains all input columns |
+| `*_annotated.xlsx` | Full input for all records, with four appended decision columns: `name_to_use`, `description_text`, `check_ENA_with_GBIF`, `manual_verification_needed` |
+| `*_manually_verify.xlsx` | All specimens flagged for manual verification (see Step 6). Contains all input columns plus decision columns |
+
+**Example Log Output (per sample):**
+```
+================================================================================
+Sample: BSUIO096-24
+  Scientific name (original): Teratocoris discolor
+  GBIF species: Teratocoris discolor
+  GBIF genus: Teratocoris
+  Status: ACCEPTED
+  MatchType: EXACT
+  Original genus: Teratocoris | GBIF genus: Teratocoris → Genus match: SAME
+  Original epithet: discolor | GBIF epithet: discolor → Species match: SAME
+  Type specimen: NO
+  Rule key: (ACCEPTED, EXACT, same, same, NO)
+  Rule source: RULES_MATRIX
+  → name_to_use: original
+```
+
+**Records assigned `original` (with confirmed GBIF matches) are formatted directly into a taxid request TSV. The `*_request_taxid.tsv` produced here is a completed request form** for programmatically resolved species. Set it aside for Step 11.
+
+
+
+---
+
+
+
+### Step 6 — Manual Verification
+
+
+
+
+
+
+
+
+
+–8 (Documentation in Progress)
 
 The remaining steps are:
 
 | Step | Script | Purpose |
 |---|---|---|
-| 5 | `gbif_name_processor2.py` | Process GBIF results, apply business rules, route records to: direct taxid request, ENA re-check, or manual verification |
 | 6 | *(manual — Ben's Gemini Gem)* | Manual verification of scientificNames that could not be resolved programmatically |
 | 7 | `04_post_ver_ena_check.py` | Re-run ENA check using manually verified/corrected names |
 | 8 | `05_post_ver_gbif_check.py` | Re-run GBIF search for names that still have no ENA match after verification |
