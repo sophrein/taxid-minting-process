@@ -1,5 +1,5 @@
 # taxid-minting-process
-This repository outlines the process of generating taxonomic IDs (taxids) creation request (TSV) request forms from hierarchical taxonomy data at scale. The pipeline is designed for use in large biodiversity genomics submissions (e.g. UKBOL, BGE) where hundreds to thousands of specimens require validation on whether ENA taxids exist for the taxa before request forms are generated. 
+This repository outlines the process of generating taxonomic IDs (taxids) creation request forms from hierarchical taxonomy data, at scale. The pipeline is designed for use in large biodiversity genomics submissions (e.g. UKBOL, BGE) where hundreds to thousands of specimens require validation on whether ENA taxids exist for the taxa before request forms are generated. 
 
 The pipeline handles the full complexity of real-world museum specimen taxonomy: non-species-level identifications, homonyms across kingdoms, synonyms, names absent from ENA, and manual verification edge cases.
 
@@ -7,7 +7,7 @@ The pipeline handles the full complexity of real-world museum specimen taxonomy:
 
 ## Overview
 
-The pipeline takes a flat CSV of specimen records with hierarchical taxonomic annotations and produces TSV request forms suitable for submission to ENA's taxid minting service. It does this by:
+The pipeline takes a CSV (or TSV) of specimen records with hierarchical taxonomic annotations and produces TSV request forms suitable for submission to ENA's taxid minting service. It does this by:
 
 1. Splitting records by identification rank (species vs. non-species)
 2. Validating names directly against the ENA taxonomy API
@@ -43,7 +43,7 @@ The pipeline expects a **CSV or TSV file** containing one row per specimen, with
 
 | Column | Required | Description |
 |---|---|---|
-| `Sample ID` (or allowed alternative) | Yes | Unique specimen/sample identifier |
+| `Sample ID` (or permitted alternative) | Yes | Unique specimen/sample identifier |
 | `species` | Yes | Species-level identification (leave empty if not identified to species) |
 | `genus` | Yes | Genus (leave empty if not identified to genus) |
 | `family` | Yes | Family (leave empty if not identified to family) |
@@ -146,7 +146,7 @@ Where a name cannot be matched directly, the script attempts disambiguation usin
 
 
 
-### Step 3 — ENA Taxid Check, Round 1 (`01_ena_taxid_check4.py`)
+### Step 3 — ENA Taxid Check, Round 1 (`01_ena_taxid_check.py`)
 
 **Purpose:** Query the ENA taxonomy API for each species-level record from Step 1. Identifies which names are already present in ENA (and taxonomically consistent), and which require further processing.
 
@@ -221,11 +221,10 @@ python 02_gbif_backbone_search.py \
 
 **Logic:**
 The script implements a multi-stage search strategy for each record:
-
-**Stage 1 — Standard search.** Queries `name_backbone()` with the `scientificName` only (no taxonomic constraints). If the result is valid (has a usageKey, is not too broad), this result is used.
-**Stage 2 — Disambiguation.** If Stage 1 returns `usageKey=1` (Animalia root, meaning the name matched the entire animal kingdom) or a rank of `KINGDOM`/`PHYLUM`, the search is retried with `phylum`, `order`, and/or `family` as constraints. This handles cases like genus names that are homonyms across multiple families.
-**Stage 3 — Homonym resolution.** If the ENA status for this record was `TAXONOMIC_MISMATCH_HOMONYM`, the search goes directly to a phylum-constrained lookup, bypassing Stage 1.
-**Stage 4 — Fuzzy lookup.** If all above stages fail to find a valid match, queries with `verbose=True` to retrieve alternative matches, filtered by phylum (and optionally family) to catch misspellings. This catches genuine misspellings in the input data (e.g. `"Etone flava"` → `"Eteone flava"`).
+1. **Standard search.** Queries `name_backbone()` with the `scientificName` only (no taxonomic constraints). If the result is valid (has a usageKey, is not too broad), this result is used.
+2. **Disambiguation.** If the stadnard search returns `usageKey=1` (Animalia root, meaning the name matched the entire animal kingdom) or a rank of `KINGDOM`/`PHYLUM`, the search is retried with `phylum`, `order`, and/or `family` as constraints. This handles cases like genus names that are homonyms across multiple families.
+3. **Homonym resolution.** If the ENA status for this record was `TAXONOMIC_MISMATCH_HOMONYM`, the search goes directly to a phylum-constrained lookup, bypassing the standard search.
+4. **Fuzzy lookup.** If all above stages fail to find a valid match, queries with `verbose=True` to retrieve alternative matches, filtered by phylum (and optionally family) to catch misspellings. This catches genuine misspellings in the input data (e.g. `"Etone flava"` → `"Eteone flava"`).
 
 
 **Key output columns added:**
@@ -275,7 +274,7 @@ The script implements a multi-stage search strategy for each record:
 ---
 
 
-## Step 5 - Processing Name Processing (`gbif_processor.py`)
+### Step 5 - Processing Name Processing (`gbif_processor.py`)
 
 **Purpose:** This step applies a rules-based decision matrix to the GBIF backbone taxonomy match results from Step 4, determining whether the original submitted name or the GBIF-matched name should be used for each specimen in the downstream ENA taxonomy submission.
 
@@ -417,7 +416,7 @@ Records in `*-no_ena_matches.csv` still have no ENA match, will proceed to downs
 
 
 
-# Step 8: GBIF Backbone Search, Round 2 (`05_gbif_ver_check.py`)
+### Step 8: GBIF Backbone Search, Round 2 (`05_gbif_ver_check.py`)
 
 **Purpose:** This step runs a second round of GBIF backbone taxonomy searching against the `confirmed_taxonomy` column (the manually reviewed and verified name from Step 6/7). Results are appended to the input as `gbif_*_2` columns. The primary purpose here is to retrieve supporting evidence (GBIF species page URLs, authorship, taxonomic references) that will be used to populate the `description` field in the final ENA taxid request form, created in Step 9.
 
@@ -458,56 +457,107 @@ All original input columns are preserved. The following `gbif_*_2` columns are i
 
 ###  Step 9: Final Manual Verification
 
+**Purpose:** After round 2 of ENA matching and name variaiton searches using GBIF, one final (simpler) round of manual verification is required - this consists of double checking supporting literature references or other sensible supporting information (in the form of `valid species: [sensible supporting information] is entered into the 'notes' column created in the previous manual verification stage. This step is required for those samples where we forgo the suggested GBIF name, and therefore cannot use the relevant GBIF key as evidence in the 'description' column of the final request form.
 
+**Examples:**
+| confirmed_taxonomy | notes (supporting information) |
+|---|---|
+| Glyptapanteles aliphera | GBIF out of date; I've followed the catalogue of Fernandez-Triana et al. (2020) |
+| Trogoxylon parallelipipedum | spelling error in Duff 2018- should be Trogoxylon parallelipipedum |
+| Tachyura walkeriana | GBIF out of date, I have followed Lobl & Lobl 2017 |
 
+- Save the (final) manually reviewed and updated `05_post_ver_gbif_search.csv` file from Step 8, and proceed to the final step, Step 10.
 
-
-
-
-
-
-## Output Files for Submission
-
-At the end of the pipeline, three TSV request forms are produced. These are concatenated into a single request (TSV) file:
-
-| Form | Source | Description |
-|---|---|---|
-| Non-species request form | `requester_non-species.py` | Records identified to genus or higher |
-| Species request form (programmatic) | `03_gbif_name_processor.py` | Species names resolved via ENA/GBIF without manual intervention |
-| Species request form (manual) | `06_final_species_request.py` | Species names resolved after manual verification |
 
 ---
 
+
+
+### Step 10: Final taxid request form genertion (06_final_species_request.py)
+
+
+**Purpose:** Generates the final ENA taxid request TSV for the remaining species-level records that required manual verification and have no existing ENA entry.
+
+**Run:**
+```bash
+python 06_final_species_request.py \
+    --input ./taxid_request/05_post_ver_gbif_search/05_post_ver_gbif_search-complete.csv \
+    --output ./taxid_request/06_final_species_request_form/ \
+    --project-id "YOUR_PROJECT_ID"
+```
+
+| Argument | Description |
+|---|---|
+| `--input` | Path to the completed CSV from Step 9 |
+| `--output` | Output directory for the request form TSV |
+| `--project-id` | Project identifier string for the request form |
+
+**Logic:**
+For each record, the script determines the appropriate `description` field for the ENA request form using the following priority order:
+1. If `confirmed_taxonomy` matches the GBIF species name returned from round 2 searching → uses the GBIF species page URL as evidence
+2. If the names differ → attempts to extract a structured reference from the `notes` column (e.g. `"Author et al. (Year)"`)
+3. If no structured reference can be identified and extracted → falls back to the full `notes` column text
+
+- The script reports which evidence source was used for each record, and flags any cases where the notes fallback was used so you can review them before submission.
+**- The TSV produced here is the third and final request form. Set it aside for Step 11.**
+
+
+---
+
+
+### Step 11 - Merging the generated request forms
+
+- Concatenate the three request form TSV files produced across the pipeline into a single submission file:
+| Source | Step | Content |
+|---|---|---|
+| `non-species_request_form.tsv` | Step 2 | Non-species-level records |
+| `*_request_taxid.tsv` (GBIF processor) | Step 5 | Species-level records resolved programmatically |
+| Final species request TSV | Step 10 | Species-level records requiring manual verification |
+
+```bash
+cat [non-species_request_form.tsv] [first_species_request_form.tsv] [second_species_request_form.tsv] > combined_request_form.tsv
+```
+- Then, open the file and manually remove the duplicated column headers
+
+**Submit `combined_request_form.tsv` to ENA**
+
+
+
+
+
+
+
+
+
+
+
+
 ## Troubleshooting
 
-**High rate of `NO_EXACT_MATCH` from ENA.** This is expected for obscure taxa (parasitoids, rare beetles, microlepidoptera) that are not yet registered in ENA. The GBIF search in Step 4 and the GBIF processor in Step 5 handle these programmatically. Truly unresolvable names go to manual verification in Step 6.
+**High rate of `NO_EXACT_MATCH` from ENA.** This is expected for obscure taxa (e.g. parasitoids, rare beetles, microlepidoptera) that are likely not yet registered in ENA. The GBIF search in Step 4 and the GBIF processor in Step 5 handle these programmatically. Truly unresolvable names go to manual verification in Step 6.
 
 **`TAXONOMIC_MISMATCH_HOMONYM` records appearing.** This means a name exists in ENA but under a different phylum than expected. Always check that your input `phylum` column is correctly populated. If the phylum is correct, the GBIF search in Step 4 will use it to resolve the homonym.
-
-**API timeouts or `API_ERROR` records.** Both the ENA and GBIF scripts include retry logic (3 attempts with delays). Persistent errors usually indicate a connectivity issue or temporary API outage. Affected records can be re-run by subsetting the input to just the failed rows.
 
 **`MATCH_PHYLUM_UNCHECKED` records.** These occur when `phylum` is empty for a record and a match was found in ENA. The match may be correct but cannot be verified. Populate `phylum` and re-run, or review manually.
 
 ---
 
-## Repository Structure
+## Script Reference
 
-```
-taxid-minting-process/
-├── 00_filter_taxonomy2.py          # Step 1: Split by rank, determine scientificName
-├── requester_non-species.py        # Step 2: Request form for non-species records
-├── 01_ena_taxid_check4.py          # Step 3: ENA validation (round 1)
-├── 02_gbif_backbone_search2.py     # Step 4: GBIF backbone search (round 1)
-├── gbif-processor/
-│   ├── gbif_name_processor2.py     # Step 5: Process GBIF results, apply rules
-│   └── gbif_rules.csv              # Business rules for GBIF processor
-├── 04_post_ver_ena_check.py        # Step 7: ENA validation (round 2, post-manual)
-├── 05_gbif_ver_check.py            # Step 8: GBIF search (round 2, post-manual)
-├── 06_final_species_request.py     # Step 10: Final species request form formatting
-└── README.md
-```
+| Script | Step | Input | Output |
+|---|---|---|---|
+| `00_filter_taxonomy.py` | 1 | Specimen metadata CSV | `_species.csv`, `_non_species.csv`, `non_species_list.txt` |
+| `requester_non-species.py` | 2 | `_non_species.csv` | `non-species_request_form.tsv` |
+| `01_ena_taxid_check.py` | 3 | `_species.csv` | ENA-matched and filtered CSVs |
+| `02_gbif_backbone_search.py` | 4 | ENA-filtered CSV | GBIF-annotated CSV |
+| `gbif_name_processor.py` | 5 | GBIF CSV + rules CSV | `_request_taxid.tsv`, `_check_ENA.xlsx`, `_manually_verify.xlsx` |
+| `04_post_ver_ena_check.py` | 7 | Completed manual verify XLSX | ENA-matched and filtered CSVs |
+| `05_gbif_ver_check.py` | 8 | Post-verification no-match CSV | GBIF-annotated CSV with evidence |
+| `06_final_species_request.py` | 10 | Reviewed GBIF CSV | Final species taxid request TSV |
+
 
 ---
+
 
 ## Citation / Acknowledgements
 
