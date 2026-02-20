@@ -1,0 +1,57 @@
+status,matchType,GBIF species value,GBIF genus value,Type specimen,name to use,text to add to 'description' column of taxononmy_request.tsv,check ENA with GBIF name?,manual verification needed
+SYNONYM,EXACT,same,same,YES,not a possible combination,,,
+SYNONYM,EXACT,same,same,NO,not a possible combination,,,
+SYNONYM,EXACT,same,different,YES,GBIF,,yes,yes
+SYNONYM,EXACT,same,different,NO,GBIF,,yes,yes
+SYNONYM,EXACT,different,same,YES,original,type specimen of [original],,
+SYNONYM,EXACT,different,same,NO,GBIF,,yes,yes
+SYNONYM,EXACT,different,different,YES,original,type specimen of [original],,
+SYNONYM,EXACT,different,different,NO,GBIF,,yes,yes
+SYNONYM,FUZZY,same,same,YES,not a possible combination,,,
+SYNONYM,FUZZY,same,same,NO,not a possible combination,,,
+SYNONYM,FUZZY,same,different,YES,GBIF,,yes,yes
+SYNONYM,FUZZY,same,different,NO,GBIF,,yes,yes
+SYNONYM,FUZZY,different,same,YES,original,type specimen of [original],,
+SYNONYM,FUZZY,different,same,NO,GBIF,,yes,yes
+SYNONYM,FUZZY,different,different,YES,original,type specimen of [original],,
+SYNONYM,FUZZY,different,different,NO,GBIF,,yes,yes
+ACCEPTED,EXACT,same,same,YES,original,,,
+ACCEPTED,EXACT,same,same,NO,original,,,
+ACCEPTED,EXACT,same,different,YES,not a possible combination,,,
+ACCEPTED,EXACT,same,different,NO,not a possible combination,,,
+ACCEPTED,EXACT,different,same,YES,not a possible combination,,,
+ACCEPTED,EXACT,different,same,NO,not a possible combination,,,
+ACCEPTED,EXACT,different,different,YES,not a possible combination,,,
+ACCEPTED,EXACT,different,different,NO,not a possible combination,,,
+ACCEPTED,FUZZY,same,same,YES,not a possible combination,,,
+ACCEPTED,FUZZY,same,same,NO,not a possible combination,,,
+ACCEPTED,FUZZY,same,different,YES,GBIF,,yes,no
+ACCEPTED,FUZZY,same,different,NO,GBIF,,yes,no
+ACCEPTED,FUZZY,different,same,YES,GBIF,,yes,yes
+ACCEPTED,FUZZY,different,same,NO,GBIF,,yes,yes
+ACCEPTED,FUZZY,different,different,YES,GBIF,,yes,yes
+ACCEPTED,FUZZY,different,different,NO,GBIF,,yes,yes
+DOUBTFUL,EXACT,same,same,YES,original,,,yes
+DOUBTFUL,FUZZY,same,different,YES,original,,,yes
+DOUBTFUL,FUZZY,different,same,YES,original,,,yes
+DOUBTFUL,EXACT,different,different,YES,not a possible combination,,,
+DOUBTFUL,EXACT,same,different,YES,not a possible combination,,,
+DOUBTFUL,EXACT,different,same,YES,not a possible combination,,,
+DOUBTFUL,FUZZY,same,same,YES,not a possible combination,,,
+DOUBTFUL,EXACT,same,same,NO,original,,,yes
+DOUBTFUL,FUZZY,same,different,NO,original,,,yes
+DOUBTFUL,FUZZY,different,same,NO,original,,,yes
+DOUBTFUL,EXACT,different,different,NO,not a possible combination,,,
+DOUBTFUL,EXACT,same,different,NO,not a possible combination,,,
+DOUBTFUL,EXACT,different,same,NO,not a possible combination,,,
+DOUBTFUL,FUZZY,same,same,NO,not a possible combination,,,
+ACCEPTED,HIGHERRANK,different,different,YES,original,,,yes
+ACCEPTED,HIGHERRANK,same,different,YES,not a possible combination,,,
+ACCEPTED,HIGHERRANK,different,same,YES,original,,,yes
+ACCEPTED,HIGHERRANK,same,same,YES,not a possible combination,,,
+ACCEPTED,HIGHERRANK,different,different,NO,original,,,yes
+ACCEPTED,HIGHERRANK,same,different,NO,not a possible combination,,,yes
+ACCEPTED,HIGHERRANK,different,same,NO,original,,,yes
+ACCEPTED,HIGHERRANK,same,same,NO,not a possible combination,,,
+DOUBTFUL,FUZZY,different,different,NO,not a possible combination,,,
+DOUBTFUL,FUZZY,different,different,YES,not a possible combination,,,
