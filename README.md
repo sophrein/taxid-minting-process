@@ -333,7 +333,9 @@ Sample: BSUIO096-24
 
 **Records assigned `original` (with confirmed GBIF matches) are formatted directly into a taxid request TSV. The `*_request_taxid.tsv` produced here is a completed request form** for programmatically resolved species. Set it aside for Step 11.
 
-- The original `gbif_name_processor.py`, with more detailed information regaring script usage, can be found [here](https://github.com/bge-barcoding/bold-data-fun/tree/main/scripts/gbif-processor)
+> The original `gbif_name_processor.py`, with more detailed information regarding script usage, can be found [here](https://github.com/bge-barcoding/bold-data-fun/tree/main/scripts/gbif-processor).
+
+
 
 ---
 
@@ -408,7 +410,7 @@ All input columns are preserved in every output file, with the following ENA col
 | `ena_status_2` | Result status code (see Status Codes below) |
 | `ena_lineage_2` | Full taxonomic lineage from ENA |
 
-Records in `*-no_ena_matches.csv` still have no ENA match, will proceed to downstream checks, and likely require new taxid minting — proceed to Step 8.
+Records in `*-no_ena_matches.csv` still have no ENA match, will proceed to downstream checks, and likely require new taxid minting - proceed to Step 8.
 
 
 
@@ -447,8 +449,8 @@ A result is considered valid if it has a non-empty `usageKey` (not equal to 1), 
 All original input columns are preserved. The following `gbif_*_2` columns are inserted immediately after `ena_lineage_2`:
 - `gbif_usageKey_2`, `gbif_scientificName_2`, `gbif_canonicalName_2`, `gbif_rank_2`, `gbif_status_2`, `gbif_matchType_2`, `gbif_confidence_2`, `gbif_kingdom_2`, `gbif_phylum_2`, `gbif_class_2`, `gbif_order_2`, `gbif_family_2`, `gbif_genus_2`, `gbif_species_2`, `gbif_kingdomKey_2`, `gbif_phylumKey_2`, `gbif_classKey_2`, `gbif_orderKey_2`, `gbif_familyKey_2`, `gbif_genusKey_2`, `gbif_speciesKey_2`, `gbif_acceptedUsageKey_2`, `gbif_notes_2`
 - Values of `NOT_FOUND` indicate the field was absent or the search failed for that record.
-- `gbif_notes_2` values match those posdible in Step 4.
-- The output CSV from this step feeds into both the final manual verification (Step 9) and the final request form script (Step 10).
+> `gbif_notes_2` values match those possible in Step 4.
+> The output CSV from this step feeds into both the final manual verification (Step 9) and the final request form script (Step 10).
 
 
 
@@ -550,7 +552,7 @@ cat [non-species_request_form.tsv] [first_species_request_form.tsv] [second_spec
 | `requester_non-species.py` | 2 | `_non_species.csv` | `non-species_request_form.tsv` |
 | `01_ena_taxid_check.py` | 3 | `_species.csv` | ENA-matched and filtered CSVs |
 | `02_gbif_backbone_search.py` | 4 | ENA-filtered CSV | GBIF-annotated CSV |
-| `gbif_name_processor.py` | 5 | GBIF CSV + rules CSV | `_request_taxid.tsv`, `_check_ENA.xlsx`, `_manually_verify.xlsx` |
+| `03_gbif_name_processor.py` | 5 | GBIF CSV + rules CSV | `_request_taxid.tsv`, `_check_ENA.xlsx`, `_manually_verify.xlsx` |
 | `04_post_ver_ena_check.py` | 7 | Completed manual verify XLSX | ENA-matched and filtered CSVs |
 | `05_gbif_ver_check.py` | 8 | Post-verification no-match CSV | GBIF-annotated CSV with evidence |
 | `06_final_species_request.py` | 10 | Reviewed GBIF CSV | Final species taxid request TSV |
