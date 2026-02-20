@@ -274,13 +274,13 @@ The script implements a multi-stage search strategy for each record:
 ---
 
 
-### Step 5 - Processing Name Processing (`gbif_processor.py`)
+### Step 5 - Processing Name Processing (`03_gbif_name_processor.py`)
 
 **Purpose:** This step applies a rules-based decision matrix to the GBIF backbone taxonomy match results from Step 4, determining whether the original submitted name or the GBIF-matched name should be used for each specimen in the downstream ENA taxonomy submission.
 
 **Run:**
 ```bash
-python gbif_name_processor.py -i ./taxid_request/02_gbif_search/02_gbif_output_1.csv -r gbif_rules.csv -o ./output --project-id [PROJECT_ID[
+python 03_gbif_name_processor.py -i ./taxid_request/02_gbif_search/02_gbif_output_1.csv -r gbif_rules.csv -o ./output --project-id [PROJECT_ID[
 ```
 
 | Argument | Description |
@@ -333,7 +333,7 @@ Sample: BSUIO096-24
 
 **Records assigned `original` (with confirmed GBIF matches) are formatted directly into a taxid request TSV. The `*_request_taxid.tsv` produced here is a completed request form** for programmatically resolved species. Set it aside for Step 11.
 
-
+- The original `gbif_name_processor.py`, with more detailed information regaring script usage, can be found [here](https://github.com/bge-barcoding/bold-data-fun/tree/main/scripts/gbif-processor)
 
 ---
 
