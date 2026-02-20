@@ -15,7 +15,7 @@ The pipeline takes a CSV (or TSV) of specimen records with hierarchical taxonomi
 4. Routing records that cannot be resolved programmatically into a structured manual verification step
 5. Packaging all resolved names into correctly formatted taxid request forms
 
-The full pipeline involves **8 scripts** and several manual steps.
+The full pipeline involves **8 scripts** and several manual steps. **Step by step details outlining this process can be found in `scripts/README.md**
 
 ---
 
