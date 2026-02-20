@@ -448,6 +448,7 @@ For each record, the script determines the appropriate `description` field for t
 ### Step 11 - Merging the generated request forms
 
 - Concatenate the three request form TSV files produced across the pipeline into a single submission file:
+
 | Source | Step | Content |
 |---|---|---|
 | `non-species_request_form.tsv` | Step 2 | Non-species-level records |
