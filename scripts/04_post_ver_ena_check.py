@@ -18,19 +18,40 @@ WORKFLOW CONTEXT
 
 OVERVIEW
 --------
-The script takes a spreadsheet of specimen records, processes ALL rows, queries the
-ENA taxonomy API using the column specified by --man_verify_col (default: man_ver_name,
-or confirmed_taxonomy as appropriate), and outputs validated taxonomy data with ENA
-taxon IDs. Rows with an empty search column are flagged with a warning. Results are
-split into separate files based on match quality to facilitate downstream processing.
+The script takes a spreadsheet of specimen records, selects rows meeting specific
+criteria, queries the ENA taxonomy API using the column specified by --man_verify_col
+(default: confirmed_taxonomy), and outputs validated
+taxonomy data with ENA taxon IDs. Rows not meeting the selection criteria are excluded
+from all outputs. Results are split into separate files based on match quality to
+facilitate downstream processing.
+
+ROW SELECTION LOGIC
+-------------------
+Only rows meeting ONE of the following two conditions are processed and included
+in any output file. All other rows are silently excluded.
+
+Condition 1 - Manual verification rows:
+    manual_verification_needed == 'yes'
+    Search term: value from --man_verify_col column
+
+Condition 2 - GBIF name ENA check rows:
+    manual_verification_needed != 'yes'
+    AND name_to_use == 'gbif'
+    AND check_ENA_with_GBIF == 'yes'
+    Search term: value from gbif_species column
+
+If neither condition is met, the row is excluded from all outputs entirely.
 
 INPUT REQUIREMENTS
 ------------------
 Supported file formats: CSV, TSV, XLSX
 
 Required columns:
-    - <man_verify_col>: Name to search in ENA (default: man_ver_name). All rows are
-      processed; a warning is issued for any row where this column is empty.
+    - manual_verification_needed: Flag column from gbif_name_processor.py output
+    - name_to_use: Decision column from gbif_name_processor.py output
+    - check_ENA_with_GBIF: Flag column from gbif_name_processor.py output
+    - <man_verify_col>: Name to search in ENA (default: confirmed_taxonomy). A warning
+      is issued for any selected row where this column is empty.
     
 Recommended columns for homonym disambiguation:
     - phylum: Used to verify matches against ENA lineage (critical for resolving homonyms)
@@ -43,19 +64,19 @@ Optional columns (passed through to output):
 SEARCH LOGIC
 ------------
 The script:
-1. Processes ALL rows in the input file
-2. Warns (but continues) if any row has an empty confirmed_taxonomy (or specified column)
+1. Selects rows meeting Condition 1 or Condition 2 (see ROW SELECTION LOGIC)
+2. Warns (but continues) if any selected row has an empty confirmed_taxonomy
 3. Searches ENA using the specified column
-4. Outputs the full file with ENA columns appended
+4. Outputs only selected rows with ENA columns appended
 
 LOGICAL PROCESS
 ---------------
-For each row:
+For each selected row:
 
 1. GET SEARCH TERM
    - Uses the value from the specified column (--man_verify_col)
    - Removes 'cf.' qualifiers if present (e.g., "Genus cf. species" -> "Genus species")
-   - If search term is empty/missing, warns and marks as SCIENTIFIC_NAME_EMPTY
+   - If search term is empty/missing, warns and marks as MAN_VER_NAME_EMPTY
 
 2. QUERY ENA API
    - Calls: https://www.ebi.ac.uk/ena/taxonomy/rest/suggest-for-submission/{name}
@@ -80,10 +101,11 @@ For each row:
 OUTPUT FILES
 ------------
 The script produces a combined output file plus five category-specific files.
+Only rows selected for processing are included in any output file.
 If --output is 'results.csv', the following files are created:
 
 1. results.csv
-   - Combined output containing all records with ENA columns appended
+   - Combined output containing all selected records with ENA columns appended
    
 2. results-ena_matches.csv
    - Status: MATCH_TAXONOMICALLY_CONSISTENT
@@ -91,7 +113,7 @@ If --output is 'results.csv', the following files are created:
    - These are ready for ENA submission
    
 3. results-errors.csv
-   - Status: SCIENTIFIC_NAME_EMPTY, API_ERROR:*
+   - Status: MAN_VER_NAME_EMPTY, API_ERROR:*
    - Records that couldn't be processed due to missing data or API failures
    
 4. results-possible_homonym.csv
@@ -103,7 +125,7 @@ If --output is 'results.csv', the following files are created:
    - May indicate spelling errors, synonyms not in ENA, or taxa not yet in database
 
 6. results-filtered.csv
-   - All records EXCEPT those with MATCH_TAXONOMICALLY_CONSISTENT status
+   - All selected records EXCEPT those with MATCH_TAXONOMICALLY_CONSISTENT status
 
 OUTPUT COLUMNS
 --------------
@@ -125,7 +147,7 @@ STATUS CODES
     TAXONOMIC_MISMATCH_HOMONYM: Exact match but phylum mismatch (wrong kingdom/phylum)
     NO_EXACT_MATCH: API returned results but none matched exactly
     NO_RESULTS_RETURNED: API returned empty results
-    SCIENTIFIC_NAME_EMPTY: No search name provided in input row (warning issued)
+    MAN_VER_NAME_EMPTY: No search name provided in selected row (warning issued)
     API_ERROR: *: Various API communication errors (includes error details)
 
 USAGE
@@ -136,11 +158,12 @@ USAGE
     Arguments:
         --input, -i         : Path to input file (CSV, TSV, or XLSX)
         --output, -o        : Path to output CSV file (split files use same base name)
-        --man_verify_col, -mv : Column name to use as ENA search term (default: man_ver_name)
+        --man_verify_col, -mv : Column name to use as ENA search term (default: confirmed_taxonomy)
 
 LOGGING
 -------
 A log file (04_ena_taxid_check.log) is created in the output directory containing:
+    - Row selection summary
     - API calls made
     - Match details and decisions
     - Summary statistics
@@ -218,6 +241,50 @@ def is_empty_value(value):
     return str_val in ('', 'nan', 'not collected', 'none')
 
 
+def select_rows(df):
+    """
+    Select rows meeting either of the two processing conditions:
+
+    Condition 1: manual_verification_needed == 'yes'
+    Condition 2: manual_verification_needed != 'yes'
+                 AND name_to_use == 'gbif'
+                 AND check_ENA_with_GBIF == 'yes'
+
+    Returns a filtered DataFrame containing only selected rows, and logs
+    a breakdown of how many rows were selected per condition and excluded.
+    """
+    required_cols = ['manual_verification_needed', 'name_to_use', 'check_ENA_with_GBIF']
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        logger.error(
+            f"Input file is missing required flag column(s): {missing}. "
+            f"These are expected from gbif_name_processor.py output."
+        )
+        sys.exit(1)
+
+    # Normalise flag columns to lowercase strings for comparison
+    mvn = df['manual_verification_needed'].fillna('').astype(str).str.strip().str.lower()
+    ntu = df['name_to_use'].fillna('').astype(str).str.strip().str.lower()
+    ceg = df['check_ENA_with_GBIF'].fillna('').astype(str).str.strip().str.lower()
+
+    cond1 = mvn == 'yes'
+    cond2 = (mvn != 'yes') & (ntu == 'gbif') & (ceg == 'yes')
+    selected = cond1 | cond2
+
+    n_cond1 = cond1.sum()
+    n_cond2 = cond2.sum()
+    n_excluded = (~selected).sum()
+
+    logger.info(f"Row selection summary:")
+    logger.info(f"  Total rows in input:                     {len(df)}")
+    logger.info(f"  Condition 1 (manual_verification_needed=yes): {n_cond1} rows")
+    logger.info(f"  Condition 2 (name_to_use=gbif + check_ENA=yes, not manual): {n_cond2} rows")
+    logger.info(f"  Total selected for processing:           {selected.sum()}")
+    logger.info(f"  Excluded (not meeting either condition): {n_excluded} rows")
+
+    return df[selected].copy()
+
+
 def search_ena_taxonomy(taxon_name, higher_taxonomy, logger):
     """
     Search ENA taxonomy database for a taxon name and verify with higher taxonomy.
@@ -240,7 +307,7 @@ def search_ena_taxonomy(taxon_name, higher_taxonomy, logger):
     }
     
     if not taxon_name:
-        result['ena_status_2'] = 'SCIENTIFIC_NAME_EMPTY'
+        result['ena_status_2'] = 'MAN_VER_NAME_EMPTY'
         return result
     
     # Clean taxon name - remove "cf." qualifier
@@ -427,8 +494,8 @@ def search_ena_taxonomy(taxon_name, higher_taxonomy, logger):
 
 def process_dataframe(df, man_verify_col, logger):
     """
-    Process ALL rows in the dataframe, searching ENA taxonomy for each.
-    Rows with an empty search column are warned about and marked SCIENTIFIC_NAME_EMPTY.
+    Process all rows in the (pre-filtered) dataframe, searching ENA taxonomy for each.
+    Rows with an empty search column are warned about and marked MAN_VER_NAME_EMPTY.
     Appends ENA columns to all rows.
     """
     # Initialize ENA columns with empty values
@@ -452,28 +519,42 @@ def process_dataframe(df, man_verify_col, logger):
     # Track processing stats
     processed_count = 0
     empty_count = 0
-    
-    # Pre-flight check: warn about any rows with empty search column
+
+    # Use enumerate over iterrows to map back to the ena_columns lists
+    # (df index may not be 0-based after filtering)
+    rows = list(df.iterrows())
+
+    # Pre-flight check: warn about any selected rows with empty search column
     empty_rows = []
-    for idx, row in df.iterrows():
-        search_val = row.get(man_verify_col, '')
+    for list_idx, (df_idx, row) in enumerate(rows):
+        mvn = str(row.get('manual_verification_needed', '')).strip().lower()
+        check_col = man_verify_col if mvn == 'yes' else 'gbif_species'
+        search_val = row.get(check_col, '')
         if is_empty_value(search_val):
-            sample_id = row.get('ID', idx)
-            empty_rows.append((idx, sample_id))
+            sample_id = row.get('ID', df_idx)
+            empty_rows.append((list_idx, df_idx, sample_id, check_col))
 
     if empty_rows:
         logger.warning(
-            f"WARNING: {len(empty_rows)} row(s) have an empty '{man_verify_col}' column "
-            f"and will be marked as SCIENTIFIC_NAME_EMPTY:"
+            f"WARNING: {len(empty_rows)} selected row(s) have an empty search column "
+            f"and will be marked as MAN_VER_NAME_EMPTY:"
         )
-        for idx, sample_id in empty_rows:
-            logger.warning(f"  Row index {idx} (ID={sample_id})")
+        for list_idx, df_idx, sample_id, check_col in empty_rows:
+            logger.warning(f"  Row index {df_idx} (ID={sample_id}, search column='{check_col}')")
     else:
-        logger.info(f"All rows have a value in '{man_verify_col}' - good.")
+        logger.info(f"All selected rows have a non-empty search column - good.")
 
-    for idx, row in df.iterrows():
-        # Get search term
-        search_term = row.get(man_verify_col, '')
+    for list_idx, (df_idx, row) in enumerate(rows):
+        # Determine which condition selected this row, and pick search term accordingly:
+        # Condition 1 (manual_verification_needed == 'yes') -> use man_verify_col (confirmed_taxonomy)
+        # Condition 2 (name_to_use == 'gbif' + check_ENA_with_GBIF == 'yes') -> use gbif_species
+        mvn = str(row.get('manual_verification_needed', '')).strip().lower()
+        if mvn == 'yes':
+            search_col = man_verify_col
+        else:
+            search_col = 'gbif_species'
+
+        search_term = row.get(search_col, '')
         if not is_empty_value(search_term):
             search_term = str(search_term).strip()
         else:
@@ -485,8 +566,8 @@ def process_dataframe(df, man_verify_col, logger):
             if level in row and pd.notna(row[level]) and str(row[level]).strip().lower() not in ('', 'not collected', 'nan'):
                 higher_taxonomy[level] = str(row[level]).strip()
         
-        sample_id = row.get('ID', idx)
-        logger.info(f"Row {idx} (ID={sample_id}): searching '{man_verify_col}' = '{search_term}'")
+        sample_id = row.get('ID', df_idx)
+        logger.info(f"Row {df_idx} (ID={sample_id}): searching '{search_col}' = '{search_term}'")
         
         # Rate limiting
         current_time = time.time()
@@ -499,7 +580,7 @@ def process_dataframe(df, man_verify_col, logger):
         # Search ENA
         if search_term:
             result = search_ena_taxonomy(search_term, higher_taxonomy, logger)
-            ena_columns['ena_search_term_2'][idx] = search_term
+            ena_columns['ena_search_term_2'][list_idx] = search_term
             processed_count += 1
         else:
             result = {
@@ -509,29 +590,29 @@ def process_dataframe(df, man_verify_col, logger):
                 'ena_rank_2': '',
                 'ena_otherNames_2': '',
                 'ena_commonName_2': '',
-                'ena_status_2': 'SCIENTIFIC_NAME_EMPTY',
+                'ena_status_2': 'MAN_VER_NAME_EMPTY',
                 'ena_lineage_2': ''
             }
-            ena_columns['ena_search_term_2'][idx] = ''
+            ena_columns['ena_search_term_2'][list_idx] = ''
             empty_count += 1
         
         # Store results
-        ena_columns['ena_search_source_2'][idx] = man_verify_col
-        ena_columns['ena_scientificName_2'][idx] = result['ena_scientificName_2']
-        ena_columns['ena_taxid_2'][idx] = result['ena_taxid_2']
-        ena_columns['ena_displayName_2'][idx] = result['ena_displayName_2']
-        ena_columns['ena_rank_2'][idx] = result['ena_rank_2']
-        ena_columns['ena_otherNames_2'][idx] = result['ena_otherNames_2']
-        ena_columns['ena_commonName_2'][idx] = result['ena_commonName_2']
-        ena_columns['ena_status_2'][idx] = result['ena_status_2']
-        ena_columns['ena_lineage_2'][idx] = result.get('ena_lineage_2', '')
+        ena_columns['ena_search_source_2'][list_idx] = search_col
+        ena_columns['ena_scientificName_2'][list_idx] = result['ena_scientificName_2']
+        ena_columns['ena_taxid_2'][list_idx] = result['ena_taxid_2']
+        ena_columns['ena_displayName_2'][list_idx] = result['ena_displayName_2']
+        ena_columns['ena_rank_2'][list_idx] = result['ena_rank_2']
+        ena_columns['ena_otherNames_2'][list_idx] = result['ena_otherNames_2']
+        ena_columns['ena_commonName_2'][list_idx] = result['ena_commonName_2']
+        ena_columns['ena_status_2'][list_idx] = result['ena_status_2']
+        ena_columns['ena_lineage_2'][list_idx] = result.get('ena_lineage_2', '')
     
     logger.info(
         f"Processing complete: {processed_count} rows searched, "
-        f"{empty_count} rows skipped (empty '{man_verify_col}')"
+        f"{empty_count} rows skipped (empty search column)"
     )
     
-    # Append ENA columns to dataframe
+    # Append ENA columns to dataframe using positional assignment
     for col_name, col_data in ena_columns.items():
         df[col_name] = col_data
     
@@ -559,11 +640,11 @@ def categorize_status(status):
     Returns one of: 'ena_matches', 'errors', 'possible_homonym', 'no_ena_matches'
     """
     if not status or str(status).strip() == '':
-        return 'errors'  # Shouldn't happen since all rows are processed, but handle gracefully
+        return 'errors'
     
     if status == 'MATCH_TAXONOMICALLY_CONSISTENT':
         return 'ena_matches'
-    elif status == 'SCIENTIFIC_NAME_EMPTY' or str(status).startswith('API_ERROR'):
+    elif status == 'MAN_VER_NAME_EMPTY' or str(status).startswith('API_ERROR'):
         return 'errors'
     elif status in ('MATCH_PHYLUM_UNCHECKED', 'TAXONOMIC_MISMATCH_HOMONYM'):
         return 'possible_homonym'
@@ -577,11 +658,11 @@ def categorize_status(status):
 def write_split_outputs(output_df, base_output_path, logger):
     """
     Split the output dataframe by ena_status_2 category and write to separate files.
-    Since all rows are processed, all rows appear in one of the split files.
+    Only selected/processed rows are present in the dataframe at this point.
     
     Categories:
     - ena_matches: MATCH_TAXONOMICALLY_CONSISTENT
-    - errors: SCIENTIFIC_NAME_EMPTY, API_ERROR:*
+    - errors: MAN_VER_NAME_EMPTY, API_ERROR:*
     - possible_homonym: MATCH_PHYLUM_UNCHECKED, TAXONOMIC_MISMATCH_HOMONYM
     - no_ena_matches: NO_EXACT_MATCH, NO_RESULTS_RETURNED
     - filtered: All records EXCEPT MATCH_TAXONOMICALLY_CONSISTENT
@@ -623,21 +704,29 @@ def main(input_file, output_file, man_verify_col):
     df = read_file(input_file)
     logger.info(f"Read {len(df)} rows from input file")
     logger.info(f"Input columns: {df.columns.tolist()}")
-    
+
+    # Select rows meeting processing conditions
+    logger.info("Applying row selection criteria...")
+    df_selected = select_rows(df)
+
+    if len(df_selected) == 0:
+        logger.warning("No rows met the selection criteria. No output files will be written.")
+        sys.exit(0)
+
     # Check that the search column exists
-    if man_verify_col not in df.columns:
+    if man_verify_col not in df_selected.columns:
         logger.error(f"Search column '{man_verify_col}' not found in input.")
-        logger.error(f"Available columns: {df.columns.tolist()}")
+        logger.error(f"Available columns: {df_selected.columns.tolist()}")
         sys.exit(1)
     
-    logger.info(f"ENA search column: '{man_verify_col}'")
-    logger.info(f"Total rows to process: {len(df)}")
+    logger.info(f"ENA search column: '{man_verify_col}' (Condition 1) / 'gbif_species' (Condition 2)")
+    logger.info(f"Total rows selected for processing: {len(df_selected)}")
     
     logger.info("Starting ENA taxonomy searches (rate limited to 25 queries/second)...")
-    df_with_ena = process_dataframe(df, man_verify_col, logger)
+    df_with_ena = process_dataframe(df_selected, man_verify_col, logger)
     logger.info("Completed ENA taxonomy searches")
     
-    # Save combined output (all rows, ENA columns appended)
+    # Save combined output (selected rows only, ENA columns appended)
     df_with_ena.to_csv(output_file, index=False)
     logger.info(f"Combined output written to '{output_file}' ({len(df_with_ena)} rows)")
     
@@ -654,15 +743,17 @@ def main(input_file, output_file, man_verify_col):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Search ENA taxonomy database for all rows in the input file, '
-                    'using the column specified by --man_verify_col as the search term.'
+        description='Search ENA taxonomy database for selected rows in the input file. '
+                    'Rows are selected if manual_verification_needed=yes, OR if '
+                    'name_to_use=gbif AND check_ENA_with_GBIF=yes (and not manual verification). '
+                    'All other rows are excluded from outputs.'
     )
     parser.add_argument('--input', '-i', dest='input', required=True,
                         help='Input CSV/TSV/XLSX file path')
     parser.add_argument('--output', '-o', dest='output', required=True,
                         help='Output CSV file path')
-    parser.add_argument('--man_verify_col', '-mv', dest='man_verify_col', default='man_ver_name',
-                        help='Column name to use as ENA search term (default: man_ver_name)')
+    parser.add_argument('--man_verify_col', '-mv', dest='man_verify_col', default='confirmed_taxonomy',
+                        help='Column name to use as ENA search term (default: confirmed_taxonomy)')
     
     args = parser.parse_args()
     main(args.input, args.output, args.man_verify_col)
