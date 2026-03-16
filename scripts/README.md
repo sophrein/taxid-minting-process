@@ -247,10 +247,10 @@ For each specimen the script:
 **Outputs:**
 | File | Description |
 |---|---|
-| `*_request_taxid.tsv` | Ready-to-submit taxid request TSV for `name_to_use == original` records and no manual verification is required. Deduplicated by name. Description column contains a GBIF species URL (`gbif_speciesKey`), falling back to the genus URL (`gbif_genusKey`) if the species key is absent. Type specimens have `\| TYPE` appended to the description. `name_type` is `published_name` for species-key matches or `novel_species` for genus-key fallbacks |
-| `*_check_ENA.xlsx` | Specimens where `name_to_use == gbif`, requiring ENA validation using the GBIF-matched name. Contains all input columns |
-| `*_annotated.xlsx` | Full input for all records, with four appended decision columns: `name_to_use`, `description_text`, `check_ENA_with_GBIF`, `manual_verification_needed` |
-| `*_manually_verify.xlsx` | All specimens flagged for manual verification (see Step 6). Contains all input columns plus decision columns |
+| `03_gbif_processor_original_name_request_form.tsv` | Ready-to-submit taxid request TSV where `name_to_use == original` records and no manual verification is required. Deduplicated by specimen name. Description column contains a GBIF species URL (`gbif_speciesKey`), falling back to the genus URL (`gbif_genusKey`) if the species key is absent. Type specimens have `\| TYPE` appended to the description. `name_type` is `published_name` for species-key matches or `novel_species` for genus-key fallbacks |
+| `03_gbif_processor_check_ENA.xlsx` | Specimens where `name_to_use == gbif`, requiring ENA validation using the GBIF-matched name. Contains all input columns |
+| `03_gbif_processor_annotated.xlsx` | Full input for all records, with four appended decision columns: `name_to_use`, `description_text`, `check_ENA_with_GBIF`, `manual_verification_needed` |
+| `03_gbif_processor_manually_verify.xlsx` | All specimens flagged for manual verification (see Step 6). Contains all input columns plus decision columns |
 
 **Example Log Output (per sample):**
 ```
@@ -281,14 +281,16 @@ Sample: BSUIO096-24
 
 ### Step 6 — Manual Verification
 
-**Purpose:** There is a chance some specimen taxonomy cannot be resolved programatically and require manual taxonomic review to determine the correct, currently accepted scientific name before they can be submitted to ENA. These are written to `{basename}_manually_verify.xlsx` by the GBIF Name Processor (Step 5) and should be reviewed by a taxonomist or the submitting researcher before proceeding.
+**Purpose:** There is a chance some specimen taxonomy cannot be resolved programatically and requires manual taxonomic review to determine the correct, currently accepted scientific name before they can be submitted to ENA. These are written to `03_gbif_processor_annotated.xlsx` and `03_gbif_processor_manually_verify.xlsx` by the GBIF Name Processor (Step 5) and should be reviewed by a taxonomist or the submitting researcher before proceeding.
 
-For each record, determine whether the `scientificName` is a valid, GBIF species name, or whether it requires correction, and record your decision in a mnaully appended `confirmed_taxonomy` column. Supporting evidence for your decision should be provide din a manually appended `notes` column. 
+For each record in `03_gbif_processor_annotated.xlsx`, filtered so that 'manual_verification_needed' == yes), decide on the accepted taxonomy, whether this is the original 'scientificName', 'gbif_species' name, or another name entirely. First append `confirmed_taxonomy` and `notes` column headings to the end of the file, and then:
+- If the `scientificName` is valid and up to date, and GBIF is incorrect — copy the scientificName to the `confirmed_taxonomy` column (unchanged), and enter some supporting information (see below for guidance) in the 'notes' column.
+- If the `gbif_species` name is valid and up to date - copy the gbif_species name to the `confirmed_taxonomy` column (unchanged). Not supporting information is required in the 'notes' column as we have the gbif_speciesKey to reinforce our choice.
+- If neither the scientificName nor gbif_species names are correct (e.g. due to a misspelling of the scientificName) — provide the correct name in `confirmed_taxonomy` along with supporting evidence in the 'notes' column.
 
-- If the scientificName is **valid, accepted, and GBIF is incorrect** — copy the scientificName to the `confirmed_taxonomy` column, unchanged.
-- If the taxon name **requires manual correction** — **provide the accepted name in `confirmed_taxonomy` along with supporting evidence in `notes`, such as a link to a taxonomic database other than GBIF, or a literature reference**. Useful resources for verification include [Catalogue of Life](https://www.catalogueoflife.org/), [ITIS](https://www.itis.gov/), [WoRMS](https://www.marinespecies.org/), [Index Fungorum](https://www.indexfungorum.org/), and relevant taxonomic literature.
+> Supporting evidence in 'notes' could includes a link to a taxonomic database other than GBIF, or a literature reference. Useful resources for verification include [Catalogue of Life](https://www.catalogueoflife.org/), [ITIS](https://www.itis.gov/), [WoRMS](https://www.marinespecies.org/), [Index Fungorum](https://www.indexfungorum.org/), and relevant taxonomic literature.
 
-Save the completed file as `*_manually_verify-complete.xlsx` before proceeding.
+Save the completed file as `03_gbif_processor_annotated-man_ver_complete.xlsx` before proceeding.
 
 
 
@@ -303,7 +305,7 @@ Save the completed file as `*_manually_verify-complete.xlsx` before proceeding.
 **Run:**
 ```bash
 python 04_post_ver_ena_check.py \
-    -i ./taxid_request/03_gbif_processor/02_gbif_output_1_manually_verify-complete.xlsx \
+    -i ./taxid_request/03_gbif_processor/03_gbif_processor_annotated-man_ver_complete.xlsx \
     -o ./taxid_request/04_post_ver_ena_check/04_ena_post_ver.csv \
     --man_verify_col "confirmed_taxonomy"
 ```
@@ -315,7 +317,7 @@ python 04_post_ver_ena_check.py \
 | `--man_verify_col` | Name of the column containing verified/corrected names (default: `confirmed_taxonomy`) |
 
 **Logic:**
-Applies the same ENA API search logic as Step 3 but reads the corrected/confirmed name from `confirmed_taxonomy` rather than `scientificName`. This ensures that any name corrections made during manual verification are checked against ENA before proceeding further — a proportion of corrected names will already exist in ENA.
+Applies the same ENA API search logic as Step 3 but reads the corrected/confirmed name from `confirmed_taxonomy` rather than `scientificName` (where 'manual_verification_needed' == yes), or . This ensures that any name corrections made during manual verification are checked against ENA before proceeding further — a proportion of corrected names will already exist in ENA.
 
 For each sample, the script:
 1. **Gets the search term** from the specified column, stripping any ambiguous qualifiers (e.g. `Genus cf. species` → `Genus species`).
