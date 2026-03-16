@@ -3,6 +3,9 @@ This repository outlines the process of generating taxonomic IDs (taxids) creati
 
 The pipeline handles the full complexity of real-world museum specimen taxonomy: non-species-level identifications, homonyms across kingdoms, synonyms, names absent from ENA, and manual verification edge cases.
 
+<img width="1125" height="362" alt="image" src="https://github.com/user-attachments/assets/88bb0499-d401-4e48-8e71-9cf79cc45e0f" />
+
+
 ---
 
 ## Overview
