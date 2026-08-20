@@ -55,9 +55,7 @@ import time
 from datetime import datetime
 
 
-# GBIF fields to capture from backbone search
-# Note: 'synonym' field removed as it's redundant with 'status' (which returns
-# SYNONYM, ACCEPTED, etc.) and was not reliably populated by the API
+# GBIF fields to capture from backbone search Note: 'synonym' field removed as it's redundant with 'status' (which returns SYNONYM, ACCEPTED, etc.) and was not reliably populated by the API
 GBIF_FIELDS = [
     'usageKey',
     'scientificName',
@@ -87,7 +85,7 @@ GBIF_FIELDS = [
 INVALID_RANKS = {'KINGDOM', 'PHYLUM'}
 
 
-# === V2 CHANGE 1: translate the v2 response into the flat v1 field set ========
+# === translate the v2 response into the flat v1 field set ========
 #
 # In v2 the classification is a list, one entry per rank, rather than named
 # fields. Only the ranks in GBIF_FIELDS are kept - v2 can also return DOMAIN,
@@ -118,23 +116,23 @@ def normalise_v2(response):
 
     Returns:
         dict: every key in GBIF_FIELDS, with 'NOT_FOUND' where absent
-    """    flat = {field: 'NOT_FOUND' for field in GBIF_FIELDS}
+    """    
+    
+    flat = {field: 'NOT_FOUND' for field in GBIF_FIELDS}
 
     if not response:
         return flat
 
-    # A verbose response can come back without 'usage' at all - its keys are
-    # just ['diagnostics', 'synonym']. An alternative entry may also carry its
-    # name fields at the top level rather than nested under 'usage'.
+    # Not every response has a 'usage' section: a verbose search that finds nothing returns only 'diagnostics' and 'synonym'.	
     usage = response.get('usage')
     if not usage:
         usage = response if response.get('key') is not None else {}
 
+# if a response ever carries its name fields at the top level, read them there rather than silently returning NOT_FOUND for everything.		
     accepted = response.get('acceptedUsage') or {}
     diagnostics = response.get('diagnostics') or {}
 
-    # Match details sit under 'diagnostics' in a full response, but at the top
-    # level in an alternative entry.
+    # Match details sit under 'diagnostics' in a full response, but at the top level in an alternative entry.
     match_type = diagnostics.get('matchType', response.get('matchType'))
     confidence = diagnostics.get('confidence', response.get('confidence'))
     note = diagnostics.get('note', response.get('note'))
@@ -155,8 +153,8 @@ def normalise_v2(response):
 
     if match_type is not None:
         flat['matchType'] = match_type
-    # Tested with 'is not None' rather than truthiness: a confidence of 0 is a
-    # real value.
+
+    # 'is not None' so that a confidence of 0 is kept, not treated as missing.
     if confidence is not None:
         flat['confidence'] = confidence
     if note is not None and 'note' in flat:
